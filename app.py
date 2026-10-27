@@ -48,6 +48,8 @@ class SpecialCodeCleaner(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
+        if hasattr(X, "columns") and not hasattr(self, "feature_names_in_"):
+            self.feature_names_in_ = np.asarray(X.columns, dtype=object)
         X = X.copy()
         for c in self.late_cols_:
             X.loc[X[c].isin(self.codes_), c] = np.nan
@@ -55,9 +57,11 @@ class SpecialCodeCleaner(BaseEstimator, TransformerMixin):
         return X
 
     def get_feature_names_out(self, input_features=None):
-        if input_features is None:
+        if input_features is not None:
+            return np.asarray(input_features, dtype=object)
+        if hasattr(self, "feature_names_in_"):
             return np.asarray(self.feature_names_in_, dtype=object)
-        return np.asarray(input_features, dtype=object)
+        return np.asarray(self.late_cols_ if hasattr(self, "late_cols_") else LATE_COLS, dtype=object)
 
 
 class MissingIndicatorAdder(BaseEstimator, TransformerMixin):
@@ -217,7 +221,16 @@ FEATURE_LABELS = {
 def load_artifact():
     for p in MODEL_PATHS:
         try:
-            return joblib.load(p), p
+            art = joblib.load(p)
+            if isinstance(art, dict) and "pipeline" in art and "feature_cols" in art:
+                cols = np.asarray(art["feature_cols"], dtype=object)
+                for _, step in getattr(art["pipeline"], "steps", []):
+                    if not hasattr(step, "feature_names_in_"):
+                        try:
+                            step.feature_names_in_ = cols
+                        except Exception:
+                            pass
+            return art, p
         except FileNotFoundError:
             continue
     return None, None
